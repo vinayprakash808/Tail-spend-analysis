@@ -1,0 +1,132 @@
+tailspend$pocreateddate <- as.Date(factor(tailspend$PO.Created.date.revised), '%d-%b-%y')
+tailspend$POMonth <- months.Date(tailspend$pocreateddate ,abbreviate = TRUE)
+tailspend <- tailspend %>% filter(tailspend$PO.Value..Euro. != 0)
+bucket <- function(id, x) {
+  res <- aggregate(x ~ id, FUN = sum)
+  res <- res[order(-res$x),]
+  res <- setNames(ifelse(100*cumsum(res$x)/sum(res$x) >= "80",  "Bottom 20", "Top 80"),res$id)
+  res
+}
+Top80_Bottom20 <- bucket(tailspend$Vendor.Name,tailspend$PO.Value..Euro.)
+Top80_Bottom20 <- as.data.frame(Top80_Bottom20)
+Top80_Bottom20$Supplier_Name <- row.names(Top80_Bottom20)
+rownames(Top80_Bottom20) <- NULL
+tailspend <- left_join(tailspend, Top80_Bottom20, by = c("Vendor.Name" = "Supplier_Name"))
+library(plyr)
+library(dplyr)
+library(shiny)
+library(tidyverse)
+library(ggplot2)
+
+ui <- fluidPage(
+  tabsetPanel(
+    tabPanel("First tab",sidebarLayout
+             (
+               sidebarPanel
+               (
+                 tags$sup("Dimension of the data is",paste(paste(dim(tailspend),collapse = "&"),"rows and columns respectively",collapse = ",")),
+                 tags$hr(),
+                 h6(selectInput("a","Operations",c("NUll","Unique")),width = 200),
+                 h6(selectInput("x","Univariate",c("NUll",colnames(tailspend)),width = 200)),
+                 h6(selectInput("y","Bivariate",c("NUll",combn(names(tailspend),2,paste, collapse="&")),width = 200)),width = 3),
+                 mainPanel(tags$sup(
+                 tableOutput("message"),
+                 column(uiOutput("Zone"),width = 3.5, offset = 10),
+                 column(uiOutput("Currency"),width = 3.5, offset = 10),
+                 dataTableOutput("message1"),
+                 dataTableOutput("message2"),
+                 plotOutput("message3")
+               )
+               )
+             )
+    )
+  )
+)
+server <- function(input, output, session) {
+  r1 <- reactive({
+    if(input$a == "Unique")
+    {
+      tailspend %>% filter(Zone == input$Zone & Currency == input$Currency) %>% select(-Zone,-Currency) %>% summarise_all(n_distinct)
+    } else if(input$a == "NUll")
+    {
+      "No Operation selected"
+    }
+  })
+  output$message <- renderTable({r1()})
+  output$Zone <- renderUI({
+    selectInput("Zone", "Zone", 
+                choices = as.character(unique(tailspend$Zone)), multiple = FALSE)
+  })
+  output$Currency <- renderUI({
+    selectInput("Currency", "Currency", 
+                choices = as.character(unique(tailspend$Currency)), multiple = FALSE)
+  })
+  output$message1 <- renderDataTable({
+    if(input$x == "Company")
+    {
+      print(data.frame(sort(table(tailspend$Company),decreasing = TRUE)))
+    } else if(input$x == "Currency")
+    {
+      print(data.frame(sort(table(tailspend$Currency),decreasing = TRUE)))
+    } else if(input$x == "Departments")
+    {
+      print(data.frame(sort(table(tailspend$Departments),decreasing = TRUE)))
+    } else if(input$x == "Cost.Center")
+    {
+      print(data.frame(sort(table(tailspend$Cost.Center),decreasing = TRUE)))
+    } else if(input$x == "Auotmation")
+    {
+      print(data.frame(round(prop.table(table(tailspend$Auotmation))*100,digits = 1)))
+    } else if(input$x == "Gl.Package.Des")
+    {
+      print(data.frame(sort(table(tailspend$Gl.Package.Des),decreasing = TRUE)))
+    } else if(input$x == "Category")
+    {
+      print(data.frame(sort(table(tailspend$Category),decreasing = TRUE)))
+    } else if(input$x == "Sub.Category")
+    {
+      print(data.frame(sort(table(tailspend$Sub.Category),decreasing = TRUE)))
+    } else if(input$x == "Porg")
+    {
+      print(data.frame(sort(table(tailspend$Porg),decreasing = TRUE)))
+    } else if(input$x == "Top80_Bottom20")
+    {
+      print(data.frame(sort(table(tailspend$Top80_Bottom20),decreasing = TRUE)))
+    }
+  })
+    output$message3 <- renderPlot({
+      if(input$y == "PONo&POMonth")
+      {
+        Percentage_of_PO <- aggregate(PONo~POMonth,tailspend,function(x)length(unique(x)))
+        Percentage_of_PO$Per_of_PO <- round((Percentage_of_PO$PONo / sum(Percentage_of_PO$PONo))*100,digits = 0)
+        ggplot(Percentage_of_PO, aes(Percentage_of_PO$POMonth, Percentage_of_PO$Per_of_PO)) + geom_col()
+      } 
+    })
+    output$message2 <- renderDataTable({
+      if(input$y == "Company&Gl.Package.Des")
+      {
+        company_gl_package<-as.data.frame.matrix(table(tailspend$Gl.Package.Des,tailspend$Company))
+        company_gl_package$Glpackage <- row.names(company_gl_package)
+        print(company_gl_package[c(32,1:31)])
+      } else if(input$y == "Company&Gl.Sub.package.Des")
+      {
+        company_gl_subpackage<-as.data.frame.matrix(table(tailspend$Gl.Sub.package.Des,tailspend$Company))
+        company_gl_subpackage$Gl_subpackage <- row.names(company_gl_subpackage)
+        print(company_gl_subpackage[c(32,1:31)])
+      } else if(input$y == "Company&Departments")
+      {
+        as.data.frame.matrix(table(tailspend$Departments,tailspend$Company))
+      } else if(input$y == "Company&Porg")
+      {
+        Company_Porg <- as.data.frame.matrix(table(tailspend$Porg,tailspend$Company))
+        Company_Porg$Porg <- row.names(Company_Porg)
+        print(Company_Porg[c(32,1:31)])
+      } else if(input$y == "Company&PONo")
+      {
+      Percentage_of_PO <- aggregate(PONo~Company,tailspend,function(x)length(unique(x)))
+      Percentage_of_PO$Per_of_PO <- round((Percentage_of_PO$PONo / sum(Percentage_of_PO$PONo))*100,digits = 0)
+      print(data.frame(Percentage_of_PO[order(-Percentage_of_PO$Per_of_PO),]))
+      }
+    })
+}
+shinyApp(ui, server)
